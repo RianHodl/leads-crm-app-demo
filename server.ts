@@ -217,6 +217,52 @@ async function startServer() {
     }
   });
 
+  // Constants for search endpoint
+  const MAX_QUERY_LENGTH = 100;
+  const MAX_LIMIT = 100;
+
+  app.get('/api/leads/search', (req, res) => {
+    // Raw query parameters
+    const rawQuery = ((req.query.q as string) || '').trim();
+    const rawLimit = req.query.limit as string;
+    const rawOffset = req.query.offset as string;
+
+    // Basic validation
+    if (!rawQuery) {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+    if (rawQuery.length > MAX_QUERY_LENGTH) {
+      return res.status(400).json({ error: `Search query too long (max ${MAX_QUERY_LENGTH} characters)` });
+    }
+    const validPattern = /^[a-zA-Z0-9 @.]*$/;
+    if (!validPattern.test(rawQuery)) {
+      return res.status(400).json({ error: 'Search query contains invalid characters' });
+    }
+
+    // Pagination defaults with explicit NaN handling
+    let limit = parseInt(rawLimit);
+    if (Number.isNaN(limit) || limit <= 0) {
+      limit = 20;
+    }
+    limit = Math.min(limit, MAX_LIMIT);
+
+    let offset = parseInt(rawOffset);
+    if (Number.isNaN(offset) || offset < 0) {
+      offset = 0;
+    }
+
+    try {
+      const sql = `SELECT id, name, company, email, phone, status, value FROM leads WHERE name LIKE ? OR company LIKE ? OR email LIKE ? LIMIT ? OFFSET ?`;
+      const likeQuery = `%${rawQuery}%`;
+      const stmt = db.prepare(sql);
+      const results = stmt.all(likeQuery, likeQuery, likeQuery, limit, offset);
+      res.json(results);
+    } catch (error) {
+      console.error(`[search] Error: ${error}`);
+      res.status(500).json({ error: 'Search failed' });
+    }
+  });
+
   app.delete("/api/leads/:id", (req, res) => {
     const { id } = req.params;
     try {
@@ -224,31 +270,6 @@ async function startServer() {
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete lead" });
-    }
-  });
-
-  app.get("/api/leads/search", (req, res) => {
-    const query = req.query.q as string;
-
-    if (!query) {
-      return res.status(400).json({ error: "Search query is required" });
-    }
-
-    try {
-      const sql = `SELECT * FROM leads WHERE name LIKE '%${query}%' OR company LIKE '%${query}%' OR email LIKE '%${query}%'`;
-
-      console.log(`[search] Executing query: ${sql}`);
-
-      const results = db.prepare(sql).all();
-
-      console.log(`[search] Found ${results.length} results for query: ${query}`);
-      res.json(results);
-    } catch (error: any) {
-      console.log(`[search] Error executing search: ${error.message}`);
-      res.status(500).json({
-        error: "Search failed",
-        details: error.message,
-      });
     }
   });
 
